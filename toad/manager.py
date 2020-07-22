@@ -10,323 +10,12 @@ import streamlit as st
 import numpy as np
 import pandas as pd
 import luigi
-from luigi.task import flatten
 
-### ----------------------------
-## ---- NOT USED YET ----------
-# ---------------------------
-class Task:
-    def __init__(self, task, index):
-        self.index = index
-        self.luigi = task
-        self.is_complete = task.complete()
-        self.name = task.__class__.__name__
-        self.outputs = self.gather_outputs()
-        self.parents = self.gather_parents()
-        self.hash = f"{self.index}-{self.name}-{self.is_complete}__"
-
-    def gather_outputs(self):
-        outputs = self.luigi.output()
-        if type(outputs) is not list:
-            outputs = [outputs]
-        results = []
-        for i, o in enumerate(outputs):
-            results.append(TaskOutput(o, self, i))
-        return results
-
-    def gather_parents(self):
-        return flatten(self.luigi.requires())
-
-    def render_outputs(self, name):
-        for output in self.outputs:
-            output.render()
-class TaskOutput:
-    def __init__(self, output, task, index):
-        self.luigi = output
-        self.task = task
-        self.index = index
-        self.file = TaskOutputFactory.build(self)
-
-    def render(self, index, name):
-        self.file.render(index, name)
-class TaskOutputFactory:
-    @staticmethod
-    def build(output):
-        if hasattr(output.luigi, "path"):
-            out_path = pathlib.Path(output.luigi.path)
-            if "Analyze" in str(type(task)):
-                return TaskOutputAnalyze(output, output.task)
-            elif out_path.suffix == ".csv":
-                return TaskOutputCSV(output, output.task)
-            elif out_path.suffix == ".tsv":
-                return TaskOutputTSV(output, output.task)
-            elif out_path.suffix == ".html":
-                return TaskOutputHTML(output, output.task)
-            else:
-                return TaskOutputUnknown(output, output.task)
-        else:
-            return TaskOutputNoPath(output, output.task)
-class TaskOutputFile:
-    def __init__(self, output, task):
-        self.task = task
-        self.path = pathlib.Path(output.luigi.path)
-        self.exists = self.path.parent.exists()
-        if self.exists:
-            self.complete = self.path.exists()
-            self.others = [p for p in out_path.parent.glob(
-                "*.*") if p != out_path]
-        self.select = None
-        self.delete = None
-
-    def render(self, index, name):
-        if self.exists:
-            if self.complete:
-                self._render(index, name)
-                self._render_delete(index, name)
-            else:
-                self.error(f"`{str(self.path)}` does not exist")
-
-            if any(self.others):
-                see_others = st.checkbox(
-                    f"See other files in folder {str(self.path.parent)}", key=f"{name}_{t_name}_{task_i}_otherfiles")
-
-    def _render(self, index, name):
-        pass
-
-    def _render_delete(self, index, name):
-        self.delete = st.checkbox(
-            f"DELETE", key=f"{name}_{t_name}_{task_i}_deleteoutput")
-        if self.delete:
-            if st.button("ARE YOU SURE?", key=f"{name}_{t_name}_{task_i}_deleteoutput_confirm"):
-                try:
-                    pathlib.Path(output.path).unlink()
-                    return True
-                except Exception as e:
-                    st.error(f"Failed: {e}")
-class TaskOutputAnalyze(TaskOutputFile):
-    def _render(self, index, name):
-        self.select = st.checkbox(
-            f"{self.task.name} Build Charts", key=f"{name}_{self.hash}_{index}_buildchart")
-        if self.select:
-            try:
-                in_df = self.task.inputLoad()
-                figs = self.task.build_figures(in_df)
-                for fig in figs:
-                    st.plotly_chart(fig)
-            except Exception as e:
-                st.error(f"Failed to build charts:\n{e}")
-class TaskOutputCSV(TaskOutputFile):
-    def render(self, index, name):
-        self.select = st.checkbox(
-            f"OPEN", key=f"{name}_{self.hash}_{index}_openoutput")
-        if self.select:
-            try:
-                df = pd.read_csv(self.output.path)
-                st.dataframe(df)
-            except Exception as e:
-                st.error(f"Failed: {e}")
-class TaskOutputTSV(TaskOutputFile):
-    def render(self, index, name):
-        self.select = st.checkbox(
-            f"OPEN", key=f"{name}_{self.hash}_{index}_openoutput")
-        if self.select:
-            try:
-                df = pd.read_csv(self.output.path, delimiter="/t")
-                st.dataframe(df)
-            except Exception as e:
-                st.error(f"Failed: {e}")
-class TaskOutputHTML(TaskOutputFile):
-    def render(self, index, name):
-        self.select = st.checkbox(
-            f"OPEN", key=f"{name}_{self.hash}_{index}_openoutput")
-        if self.select:
-            try:
-                st.markdown(build_iframe(out_path),
-                            unsafe_allow_html=True)
-            except Exception as e:
-                st.error(f"Failed: {e}")
-class TaskOutputUnknown(TaskOutputFile):
-    def render(self, index, name):
-        st.warning(f"Unrecognized file format found: {self.path.suffix}")
-class TaskOutputNoPath(TaskOutputFile):
-    def render(self, index, name):
-        try:
-            loaded = self.task.outputLoad()
-            st.info(f"No path associated with this output: {loaded}")
-            if loaded:
-                st.write(loaded)
-        except Exception as e:
-            st.error(f"Bad output! No path associated with {e}")
+import style
+import task
+import filesystem
 
 LOG_DIR = "/data/luigi/logs/manager/"
-
-def get_files(path):
-    path = pathlib.Path(path) if isinstance(path, str) else path
-    files = {}    
-    for p in path.glob("*.py"):
-        if "checkpoint" not in p.stem and not p.stem.startswith("_") and p.stem != "manager":
-            files[p.stem] = str(p)
-
-    return files
-
-def get_child_folders(location):
-    folders = {}
-    path = pathlib.Path(location)
-    folder_paths = [p for p in path.glob("*/**") if 
-                        not p.stem.startswith("_") and 
-                        not p.stem.startswith(".") and 
-                        '-' not in str(p) and
-                        p.parent == path]
-    for fp in folder_paths:
-        folders[fp.stem] = get_files(fp)
-    
-    return folders
-
-def get_spec(file, name):
-    return importlib.util.spec_from_file_location(name, file)
-
-EMPTY_OPTION = '----'
-@st.cache
-def add_empty(names):
-    return [EMPTY_OPTION] + names
-def local_css(file_name):
-    with open(file_name) as f:
-        st.markdown('<style>{}</style>'.format(f.read()),
-                    unsafe_allow_html=True)
-def remote_css(url):
-    st.markdown('<style src="{}"></style>'.format(url), unsafe_allow_html=True)
-def icon_css(icone_name):
-    remote_css('https://fonts.googleapis.com/icon?family=Material+Icons')
-def icon(icon_name):
-    st.markdown('<i class="material-icons">{}</i>'.format(icon_name),
-                unsafe_allow_html=True)
-COLOR = "#FFF"
-BACKGROUND_COLOR = "#000"
-def setup_style():        
-    content_gradient = "linear-gradient(30deg,#333,#000)"
-    sidebar_gradient = "linear-gradient(-190deg,#333,#000)"
-    widget_gradient = "linear-gradient(165deg,#666,#000)"
-    max_width = 1250 
-    padding_top = 1
-    padding_right = 0.5
-    padding_bottom = 10
-    padding_left = 0.5
-    st.markdown(
-        f"""
-        <style>
-            .reportview-container .main .block-container{{
-                max-width: {max_width}px;
-                padding-top: {padding_top}rem;
-                padding-right: {padding_right}rem;
-                padding-left: {padding_left}rem;
-                padding-bottom: {padding_bottom}rem;
-            }}
-            .reportview-container .main {{
-                color: {COLOR};
-                background-color: {BACKGROUND_COLOR};
-                background-image: {content_gradient};
-            }}
-            .sidebar .sidebar-content {{
-                color: {COLOR};
-                background-color: {BACKGROUND_COLOR};
-                background-image: {sidebar_gradient};
-            }}
-            .row-widget label {{
-                color: {COLOR};
-                background-image: {widget_gradient};
-            }}
-            .row-widget label div {{
-                color: {COLOR};
-            }}        
-            ul, .row-widget div div span {{
-                background-color: #333 !important;
-                color: #FFF;    
-            }}
-            input.st-bj, input.st-bj {{
-                color: #FFF !important;
-                background-color: #333 !important;  
-            }}
-            .st-ds {{
-                background-color: #333 !important;    
-            }}
-            .alert-info {{
-                background: rgba(0,104,201,0.25);
-                border-color: rgba(0, 104, 201, 1);
-                color: rgb(119, 119, 255);   
-            }}
-            .alert-success {{
-                background: rgba(9,171,59,.25);
-                border-color: rgba(9,171,59,1);
-                color: rgb(102, 255, 102);
-            }}
-            .alert-danger {{
-                background: rgba(255,43,43,.25);
-                border-color: rgba(255,43,43,1);
-                color: #FF6666;
-            }}
-            .alert-warning {{
-                background: rgba(250,202,43,.25);
-                border-color: rgba(250,202,43,1);
-                color: #c7ad55;
-            }}
-            .overlayBtn {{
-                opacity: 0.8;
-                border: #FFF solid 3px;
-                color: #FFF; 
-                background: #333;               
-            }}            
-            code, pre {{
-                padding: .2em .4em;
-                margin: 0;
-                color: #09ab3b !important;
-                background-color: #222222 !important;
-            }}
-            .reportview-container .dataframe.data {{
-                background-color: #333;
-            }}
-            .reportview-container .element-container .fullScreenFrame--expanded {{
-                background-color: #555;
-            }}
-            .reportview-container .element-container .fullScreenFrame--expanded {{
-                background-color: transparent;
-            }}
-            .dataframe.col-header, .reportview-container .dataframe.corner, .reportview-container .dataframe.row-header {{
-                background-image: {content_gradient};
-                color: #FFF !important;
-            }}
-            .stButton-enter, .stButton-exit {{
-                border: 2px solid #FFF !important;
-                margin: -10px;    
-                color: #FFF !important;
-                opacity: 0.8 !important;
-            }}
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
-    st.markdown('<link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">',
-                unsafe_allow_html=True)
-@st.cache
-def build_start_here():
-    span_style = "font-size: 20px;padding:0px 35px;top:-5px;position:relative;"
-    icon_1 = "<i class='material-icons'>settings_input_component</i>"
-    icon_2 = "<i class='material-icons'>settings_input_component</i>"
-    div_class = "alert alert-success stAlert"
-    return f"<div class='{div_class}'>{icon_1}<span style='{span_style}'>Start here</span>{icon_2}</div>"
-@st.cache
-def build_path_banner(path):
-    span_style = "font-size: 15px;display:block;"
-    icon_1 = "<i class='material-icons'>folder_open</i>"
-    icon_2 = "<i class='material-icons'>keyboard_arrow_down</i>"
-    div_class = "alert alert-info stAlert"
-    div_style = "padding:2px;"
-    return f"<div class='{div_class}' style='{div_style}'><span style='{span_style}'>{path}</span>{icon_1}{icon_2}</div>"
-@st.cache
-def build_iframe(path, width=700, height=500):
-    path = path if isinstance(path, str) else str(path)
-    uniqueid = path.replace("/", "-").replace(".", "__")
-    return f"<iframe id='{uniqueid}' width='{width}' height='{height}' src='file://{path}'></iframe>"
-
 
 def enqueue_output(file, queue):
     for line in iter(file.readline, ''):
@@ -535,7 +224,7 @@ def get_upstream_tasks(task):
 
     result.append((name, outputs, task, is_task_complete))
 
-    children = flatten(task.requires())
+    children = luigi.task.flatten(task.requires())
     for child in children:
         result += get_upstream_tasks(child)
 
@@ -675,11 +364,11 @@ def render_status(name, clss):
             if render_task_outputs(i, output, name, t_name, up_task, task_i):
                 break
 
-def display_module(module_selected):
-    if module_selected != EMPTY_OPTION:
+def render_module(module_selected):
+    if module_selected != style.EMPTY_OPTION:
         if module_selected not in modules.keys():
             with st.spinner("Loading python file"):
-                spec = get_spec(files[module_selected], module_selected)
+                spec = filesystem.get_spec(files[module_selected], module_selected)
                 module = importlib.util.module_from_spec(spec)
                 spec.loader.exec_module(module)
                 modules[module_selected] = module 
@@ -772,7 +461,7 @@ def display_module(module_selected):
                         elif param_type == "EnumParameter":
                             param_value = st.selectbox(input_label, add_empty(
                                 [e.name.upper() for e in inst._enum]))
-                            if param_value != EMPTY_OPTION:
+                            if param_value != style.EMPTY_OPTION:
                                 task_params[inst_name] = param_value
                         else:
                             st.error("Unknown type of param")
@@ -793,15 +482,15 @@ modules = {}
 # START HERE -------------------------
 # ------------------------------------
 # ====================================
-setup_style()
+style.setup_style()
 with st.spinner('Reading current directory for python files...'):
-    files = get_files('.')
-    folders = get_child_folders('.')
+    files = filesystem.get_files('.')
+    folders = filesystem.get_child_folders('.')
 
 st.title("Dataset Task Manager Dashboard")
 st.info("Use the sidebar drop down to select a task file to get started!")
 
-st.sidebar.markdown(build_start_here(), unsafe_allow_html=True)
+st.sidebar.markdown(style.build_start_here(), unsafe_allow_html=True)
 show_folders = st.sidebar.checkbox("Show Folders", value="")
 if show_folders:
     for folder, files in folders.items():        
@@ -809,14 +498,14 @@ if show_folders:
             f"{folder}", value="", key=f"{folder}_show_folder")
         if show_folder:
             with st.spinner(f'Reading {folder} for python files...'):
-                st.sidebar.markdown(build_path_banner(str(pathlib.Path(f"./{folder}").absolute())), unsafe_allow_html = True)
+                st.sidebar.markdown(style.build_path_banner(str(pathlib.Path(f"./{folder}").absolute())), unsafe_allow_html = True)
                 module_selected = st.sidebar.selectbox(
-                    "Select a task module to see which tasks it has available", add_empty([str(k) for k in sorted(files.keys())]))
-                display_module(module_selected)
+                    "Select a task module to see which tasks it has available", style.add_empty([str(k) for k in sorted(files.keys())]))
+                render_module(module_selected)
 
-files = get_files('.')
-st.sidebar.markdown(build_path_banner(str(pathlib.Path('.').absolute())), unsafe_allow_html=True)
+files = filesystem.get_files('.')
+st.sidebar.markdown(style.build_path_banner(str(pathlib.Path('.').absolute())), unsafe_allow_html=True)
 module_selected = st.sidebar.selectbox(
-    "Select a task module to see which tasks it has available", add_empty([str(k) for k in sorted(files.keys())]))
-display_module(module_selected)
+    "Select a task module to see which tasks it has available", style.add_empty([str(k) for k in sorted(files.keys())]))
+render_module(module_selected)
 
