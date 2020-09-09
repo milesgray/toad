@@ -1,4 +1,10 @@
-# ---------------------------
+import pathlib
+
+import streamlit as st
+import pandas as pd
+import luigi
+
+
 class Task:
     def __init__(self, task, index):
         self.index = index
@@ -60,8 +66,8 @@ class TaskOutputFile:
         self.exists = self.path.parent.exists()
         if self.exists:
             self.complete = self.path.exists()
-            self.others = [p for p in out_path.parent.glob(
-                "*.*") if p != out_path]
+            self.others = [p for p in out_path.parent.glob("*.*") 
+                                    if p != out_path]
         self.select = None
         self.delete = None
 
