@@ -3,7 +3,7 @@ import pathlib
 import streamlit as st
 import pandas as pd
 import luigi
-
+from luigi.util import flatten
 
 class Task:
     def __init__(self, task, index):

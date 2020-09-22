@@ -21,7 +21,7 @@ class Job:
 
         module_classes = inspect.getmembers(modules[module_selected], inspect.isclass)
         for name, clss in module_classes:
-            if "luigi." in str(clss) or "truigi." in str(clss):
+            if "luigi." in str(clss) or "toad." in str(clss):
                 continue
             st.sidebar.subheader("{}::{}".format(name, str(clss)))
             st.sidebar.markdown(clss.__doc__)
@@ -109,7 +109,7 @@ class Job:
                             st.error("Unknown type of param")
 
                 if st.button(f"Execute {name}", key=f"{name}_exe"):
-                    st.markdown("## Starting a Truigi Task!")
+                    st.markdown("## Starting a toad Task!")
                     st.write(time.strftime(
                         '%a, %d %b %Y %H:%M:%S GMT', time.localtime()))
                     start_task(name, module_selected,
